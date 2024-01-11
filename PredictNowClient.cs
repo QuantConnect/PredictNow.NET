@@ -26,7 +26,7 @@ namespace QuantConnect.PredictNowNET;
 /// <summary>
 /// REST Client for PredictNow CPO 
 /// </summary>
-public class PredictNowClient
+public class PredictNowClient : IDisposable
 {
     private readonly HttpClient _client;
     private readonly string _userId;
@@ -64,7 +64,14 @@ public class PredictNowClient
     /// <summary>
     /// Checks whether we can connect to the endpoint
     /// </summary>
-    public bool Connected => TryRequest<Dictionary<string,string>>(new HttpRequestMessage(), out _);
+    public bool Connected
+    {
+        get
+        {
+            using var request = new HttpRequestMessage();
+            return TryRequest<Dictionary<string, string>>(request, out _);
+        }
+    }
 
     /// <summary>
     /// List all files with return information
@@ -146,7 +153,7 @@ public class PredictNowClient
         portfolioParameters.SetUserId(_userId);
         var livePredictionParameters = new LivePredictionParameters(portfolioParameters, rebalanceDate, nextRebalanceDate, marketDays, debug);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, "run-live-prediction")
+        using var request = new HttpRequestMessage(HttpMethod.Post, "run-live-prediction")
         {
             Content = new StringContent(JsonConvert.SerializeObject(livePredictionParameters), Encoding.UTF8, "application/json")
         };
@@ -161,7 +168,7 @@ public class PredictNowClient
     /// <returns>The Job object with current information</returns>
     public Job GetJobForId(string jobId)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, $"get-cpo-job-status/{jobId}");
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"get-cpo-job-status/{jobId}");
         return TryRequest<Job>(request, out var result) ? result : Job.Null;
     }
 
@@ -178,7 +185,7 @@ public class PredictNowClient
         portfolioParameters.SetUserId(_userId);
         var backtestParameters = new BacktestParameters(portfolioParameters, trainingStartDate, trainingEndDate, null, debug);
 
-        var request = new HttpRequestMessage(HttpMethod.Get, "get-backtest-performance")
+        using var request = new HttpRequestMessage(HttpMethod.Get, "get-backtest-performance")
         {
             Content = new StringContent(JsonConvert.SerializeObject(backtestParameters), Encoding.UTF8, "application/json")
         };
@@ -199,7 +206,7 @@ public class PredictNowClient
         portfolioParameters.SetUserId(_userId);
         var backtestParameters = new BacktestParameters(portfolioParameters, trainingStartDate, trainingEndDate, null, debug);
 
-        var request = new HttpRequestMessage(HttpMethod.Get, "get-backtest-weights")
+        using var request = new HttpRequestMessage(HttpMethod.Get, "get-backtest-weights")
         {
             Content = new StringContent(JsonConvert.SerializeObject(backtestParameters), Encoding.UTF8, "application/json")
         };
@@ -236,7 +243,7 @@ public class PredictNowClient
         portfolioParameters.SetUserId(_userId);
         var livePredictionParameters = new LivePredictionParameters(portfolioParameters, rebalanceDate, null, marketDays, debug);
 
-        var request = new HttpRequestMessage(HttpMethod.Get, "get-live-prediction-weights")
+        using var request = new HttpRequestMessage(HttpMethod.Get, "get-live-prediction-weights")
         {
             Content = new StringContent(JsonConvert.SerializeObject(livePredictionParameters), Encoding.UTF8, "application/json")
         };
@@ -261,6 +268,11 @@ public class PredictNowClient
     }
 
     /// <summary>
+    /// Release unmanaged resource
+    /// </summary>
+    public void Dispose() => _client.Dispose();
+
+    /// <summary>
     /// Uploads a given file to its type: returns, contraits or features
     /// </summary>
     /// <param name="filename">Absolute file path</param>
@@ -276,7 +288,7 @@ public class PredictNowClient
 
         using var stream = File.OpenRead(filename);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, "upload-data")
+        using var request = new HttpRequestMessage(HttpMethod.Post, "upload-data")
         {
             Content = new MultipartFormDataContent
             {
@@ -304,7 +316,7 @@ public class PredictNowClient
     /// <returns>Array of string with the files names</returns>
     private string[] ListFiles(string type)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, $"list-{type}-files/{_userId}");
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"list-{type}-files/{_userId}");
 
         TryRequest<Dictionary<string, List<string>>>(request, out var result);
 
@@ -328,7 +340,7 @@ public class PredictNowClient
         portfolioParameters.SetUserId(_userId);
         var backtestParameters = new BacktestParameters(portfolioParameters, trainingStartDate, trainingEndDate, samplingProportion, debug);
 
-        var request = new HttpRequestMessage(HttpMethod.Post, resource)
+        using var request = new HttpRequestMessage(HttpMethod.Post, resource)
         {
             Content = new StringContent(JsonConvert.SerializeObject(backtestParameters), Encoding.UTF8, "application/json")
         };
