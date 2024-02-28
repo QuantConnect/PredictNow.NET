@@ -18,6 +18,7 @@ using Python.Runtime;
 using QuantConnect.Configuration;
 using QuantConnect.Logging;
 using QuantConnect.PredictNowNET.Models;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
 
@@ -359,13 +360,15 @@ public class PredictNowClient : IDisposable
     {
         result = default;
         var responseContent = string.Empty;
+        var errorCode = HttpStatusCode.OK;
 
         try
         {
             var response = _client.Send(request);
+            errorCode = response.StatusCode;
             if (!response.IsSuccessStatusCode)
             {
-                Log.Error($"TryRequest({request.RequestUri.LocalPath}): Content: {response.Content}");
+                Log.Error($"TryRequest({request.RequestUri.LocalPath}): Status: {errorCode}, Response content: {response.Content.ReadAsStringAsync().Result}");
                 return false;
             }
             responseContent = response.Content.ReadAsStringAsync().Result;
@@ -373,7 +376,7 @@ public class PredictNowClient : IDisposable
         }
         catch (Exception e)
         {
-            Log.Error($"TryRequest({request.RequestUri.LocalPath}): Error: {e.Message}, Response content: {responseContent}");
+            Log.Error($"TryRequest({request.RequestUri.LocalPath}): Error: {e.Message}, Status: {errorCode}, Response content: {responseContent}");
         }
         return result != null;
     }
