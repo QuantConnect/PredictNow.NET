@@ -359,6 +359,13 @@ public class PredictNowClient : IDisposable
     private bool TryRequest<T>(HttpRequestMessage request, out T result)
     {
         result = default;
+
+        if (request.RequestUri == null)
+        {
+            Log.Error($"TryRequest(): Error: RequestUri cannot be null");
+            return false;
+        }
+
         var responseContent = string.Empty;
         var errorCode = HttpStatusCode.OK;
 
