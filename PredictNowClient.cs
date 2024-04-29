@@ -69,7 +69,7 @@ public class PredictNowClient : IDisposable
     {
         get
         {
-            using var request = new HttpRequestMessage();
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/");
             return TryRequest<Dictionary<string, string>>(request, out _);
         }
     }
@@ -186,7 +186,7 @@ public class PredictNowClient : IDisposable
         portfolioParameters.SetUserId(_userId);
         var backtestParameters = new BacktestParameters(portfolioParameters, trainingStartDate, trainingEndDate, null, debug);
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, "get-backtest-performance")
+        using var request = new HttpRequestMessage(HttpMethod.Post, "get-backtest-performance")
         {
             Content = new StringContent(JsonConvert.SerializeObject(backtestParameters), Encoding.UTF8, "application/json")
         };
@@ -207,7 +207,7 @@ public class PredictNowClient : IDisposable
         portfolioParameters.SetUserId(_userId);
         var backtestParameters = new BacktestParameters(portfolioParameters, trainingStartDate, trainingEndDate, null, debug);
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, "get-backtest-weights")
+        using var request = new HttpRequestMessage(HttpMethod.Post, "get-backtest-weights")
         {
             Content = new StringContent(JsonConvert.SerializeObject(backtestParameters), Encoding.UTF8, "application/json")
         };
@@ -244,7 +244,7 @@ public class PredictNowClient : IDisposable
         portfolioParameters.SetUserId(_userId);
         var livePredictionParameters = new LivePredictionParameters(portfolioParameters, rebalanceDate, null, marketDays, debug);
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, "get-live-prediction-weights")
+        using var request = new HttpRequestMessage(HttpMethod.Post, "get-live-prediction-weights")
         {
             Content = new StringContent(JsonConvert.SerializeObject(livePredictionParameters), Encoding.UTF8, "application/json")
         };
