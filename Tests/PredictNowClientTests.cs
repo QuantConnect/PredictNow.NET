@@ -29,7 +29,8 @@ public class PredictNowClientTests
     {
         Config.Set("predict-now-url", Environment.GetEnvironmentVariable("PREDICTNOW-BASEURL"));
         var email = Environment.GetEnvironmentVariable("PREDICTNOW-USER-EMAIL");
-        _client = new PredictNowClient(email);
+        var userName = Environment.GetEnvironmentVariable("PREDICTNOW-USER-NAME");
+        _client = new PredictNowClient(email, userName);
         _portfolioParameters = new PortfolioParameters("Demo_Project_20231211", "ETF_return.csv", "ETF_constrain.csv", 1.0, "month", 1, "first", 3, "sharpe");
     }
 
@@ -145,6 +146,34 @@ public class PredictNowClientTests
     {
         var weightsByDate = _client.GetLivePredictionWeights(_portfolioParameters, new DateTime(2022, 07, 01), debug: "debug");
         Assert.That(weightsByDate, Is.Not.Empty);
+    }
+
+
+    [Test, Order(9)]
+    public void CreateModelSuccessfully()
+    {
+        var modelParameters = new ModelParameters(Mode.Train, ModelType.Classification, FeatureSelection.Shap, Analysis.Small, Boost.Gbdt, 42.0, false, false, false, "no");
+        var message = _client.CreateModel("DemoModel", modelParameters);
+    }
+
+    [Test, Order(10)]
+    public void TrainModelSuccessfully()
+    {
+        var filename = Path.Combine(Directory.GetCurrentDirectory(), "Data", "ETF_return.csv");
+        var message = _client.Train("DemoModel", filename, "SPY");
+    }
+
+    [Test, Order(10)]
+    public void GetTrainingResultSuccessfully()
+    {
+        var result = _client.GetTrainingResult("DemoModel");
+    }
+
+    [Test, Order(11)]
+    public void PredictSuccessfully()
+    {
+        var filename = Path.Combine(Directory.GetCurrentDirectory(), "Data", "ETF_return.csv");
+        var result = _client.Predict("DemoModel", filename);
     }
 
     private void GetJobForId(string jobId)

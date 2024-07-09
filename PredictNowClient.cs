@@ -31,13 +31,15 @@ public class PredictNowClient : IDisposable
 {
     private readonly HttpClient _client;
     private readonly string _userId;
+    private readonly string? _userName;
 
     /// <summary>
     /// Creates a new instance of the REST Client for PredictNow CPO 
     /// </summary>
     /// <param name="baseUrl">The base URL to PredictNow REST endpoints</param>
     /// <param name="userId">User identification</param>
-    protected PredictNowClient(string baseUrl, string userId)
+    /// <param name="userName">User Name</param>
+    protected PredictNowClient(string baseUrl, string userId, string? userName)
     {
         if (string.IsNullOrWhiteSpace(baseUrl))
         {
@@ -50,6 +52,7 @@ public class PredictNowClient : IDisposable
         }
 
         _userId = userId;
+        _userName = userName;
         _client = new HttpClient { BaseAddress = new Uri(baseUrl) };
         _client.DefaultRequestHeaders.Clear();
         _client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json")); 
@@ -59,8 +62,9 @@ public class PredictNowClient : IDisposable
     /// Creates a new instance of REST Client for PredictNow CPO for a given user 
     /// </summary>
     /// <param name="userId">User identification</param>
+    /// <param name="userName">User Name</param>
     /// <returns></returns>
-    public PredictNowClient(string userId) : this(Config.Get("predict-now-url"), userId) { }
+    public PredictNowClient(string userId, string? userName=null) : this(Config.Get("predict-now-url"), userId, userName) { }
 
     /// <summary>
     /// Checks whether we can connect to the endpoint
@@ -266,6 +270,112 @@ public class PredictNowClient : IDisposable
     {
         var weights = GetLivePredictionWeights(portfolioParameters.As<PortfolioParameters>(), rebalanceDate, marketDays, debug);
         return ConvertCSharpDictionaryToPythonDict(weights);
+    }
+
+    /// <summary>
+    /// Create the model
+    /// </summary>
+    /// <param name="name">The name of the model</param>
+    /// <param name="parameters">Model parameters</param>
+    /// <returns>The response to this request</returns>
+    public ModelResponse CreateModel(string name, ModelParameters parameters)
+    {
+        // TODO: understand the hyp_dict parameter
+        var value = new { params_ = parameters, model_name = name, username = _userName, hyp_dict = new Dictionary<string, string>() };
+        var requestParameters = JsonConvert.SerializeObject(value).Replace("params_", "params");
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/models")
+        {
+            Content = new StringContent(requestParameters, Encoding.UTF8, "application/json")
+        };
+
+        TryRequest<ModelResponse>(request, out var result);
+        return result;
+    }
+
+    /// <summary>
+    /// Train the model
+    /// </summary>
+    /// <param name="modelName">The name of the model</param>
+    /// <param name="filename">The path to the file with the data to train the model with</param>
+    /// <param name="label">The label in the data</param>
+    /// <returns>The response to this request</returns>
+    public TrainModelResponse Train(string modelName, string filename, string label)
+    {
+        var fileInfo = new FileInfo(filename);
+        if (!fileInfo.Exists)
+        {
+            return new TrainModelResponse { Message = $"{fileInfo.FullName} does not exist" };
+        }
+
+        using var stream = File.OpenRead(filename);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/trainings")
+        {
+            Content = new MultipartFormDataContent
+            {
+                { new StringContent(Guid.NewGuid().ToString()), "train_id" },
+                { new StreamContent(stream), "file", "parquet" },
+                { new StringContent(modelName), "model_name" },
+                { new StringContent(label), "label" },
+                { new StringContent(_userId), "email" },
+                { new StringContent(_userName), "username" },
+            }
+        };
+
+        TryRequest<TrainModelResponse>(request, out var result);
+        return result;
+    }
+
+    /// <summary>
+    /// Get the training results
+    /// </summary>
+    /// <param name="modelName">The name of the model</param>
+    /// <returns>The prediction result</returns>
+    public TrainingResult GetTrainingResult(string modelName)
+    {
+        var parameters = JsonConvert.SerializeObject(new { model_name = modelName, username = _userName });
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/get_result")
+        {
+            Content = new StringContent(parameters, Encoding.UTF8, "application/json")
+        };
+
+        return TryRequest<TrainingResult>(request, out var result) ? result : TrainingResult.Null;
+    }
+
+    /// <summary>
+    /// Predict with the trained model
+    /// </summary>
+    /// <param name="modelName">Name of the model</param>
+    /// <param name="filename">Path to file with the input for the prediction</param>
+    /// <param name="exploratoryDataAnalysis">True if the predition should use exploratory data analysis</param>
+    /// <param name="probabilityCalibration">True if the model should refine the probability</param>
+    /// <returns>The prediction result</returns>
+    public PredictResult Predict(string modelName, string filename, bool exploratoryDataAnalysis = false, bool probabilityCalibration = false)
+    {
+        var fileInfo = new FileInfo(filename);
+        if (!fileInfo.Exists)
+        {
+            return new PredictResult($"{fileInfo.FullName} does not exist");
+        }
+
+        using var stream = File.OpenRead(filename);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/predictions")
+        {
+            Content = new MultipartFormDataContent
+            {
+                { new StreamContent(stream), "file", "parquet" },
+                { new StringContent(modelName), "model_name" },
+                { new StringContent(exploratoryDataAnalysis ? "yes" : "no"), "eda" },
+                { new StringContent(probabilityCalibration ? "yes" : "no"), "prob_calib" },
+                { new StringContent(_userName), "username" }
+            }
+        };
+
+        TryRequest<PredictResult>(request, out var result);
+        return result;
     }
 
     /// <summary>
