@@ -39,19 +39,20 @@ public class Job
     /// </summary>
     [JsonProperty(PropertyName = "cpo_result")]
     [JsonConverter(typeof(PerformanceJsonConverter))]
-    public Performance Performance { get; internal set; } = Performance.Null;
+    public Performance Performance { get; internal set; } = Performance.Null(string.Empty);
 
     /// <summary>
     /// Tracks the progress of the job
     /// </summary>
     [JsonProperty(PropertyName = "progress")]
     [JsonConverter(typeof(ProgressJsonConverter))]
-    public Progress Progress { get; internal set; } = Progress.Null;
+    public Progress Progress { get; internal set; } = Progress.Null(string.Empty);
 
     /// <summary>
     /// Represents an empty job (not associated with a valid backtest)
     /// </summary>
-    public static Job Null => new();
+    /// <param name="message">Information about the progress</param>
+    public static Job Null(string message) => new() { Progress = Progress.Null(message) };
 
     /// <summary>
     /// Returns a string that represents the current object

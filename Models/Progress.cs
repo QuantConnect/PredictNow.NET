@@ -38,7 +38,8 @@ public class Progress
     /// <summary>
     /// Represents an empty progress (not associated with a valid backtest)
     /// </summary>
-    static public Progress Null => new ();
+    /// <param name="message">Information about the progress</param>
+    static public Progress Null(string message) => new() { Message = message };
 }
 
 /// <summary>
@@ -60,6 +61,6 @@ public class ProgressJsonConverter : TypeChangeJsonConverter<Progress, string>
     /// <returns>The converted value</returns>
     protected override Progress Convert(string value)
     {
-        return JsonConvert.DeserializeObject<Progress>(value) ?? Progress.Null;
+        return JsonConvert.DeserializeObject<Progress>(value) ?? Progress.Null(value);
     }
 }
