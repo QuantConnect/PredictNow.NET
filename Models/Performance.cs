@@ -23,6 +23,8 @@ namespace QuantConnect.PredictNowNET.Models;
 /// </summary>
 public class Performance
 {
+    private string _message;
+
     /// <summary>
     /// Backtest return
     /// </summary>
@@ -66,15 +68,27 @@ public class Performance
     public double MaximumDrawdown { get; internal set; }
 
     /// <summary>
+    /// Creates a new instance of the Performance class
+    /// </summary>
+    protected Performance() : this(string.Empty) { }
+
+    /// <summary>
+    /// Creates a new instance of the Performance class
+    /// </summary>
+    /// <param name="message">Information about the progress</param>
+    protected Performance(string message) => _message = message;
+
+    /// <summary>
     /// Represents an empty Performance object
     /// </summary>
-    public static Performance Null => new();
+    /// <param name="message">Information about the progress</param>
+    public static Performance Null(string message) => new(message);
 
     /// <summary>
     /// Returns a string that represents the current object
     /// </summary>
     /// <returns>A string that represents the current object</returns>
-    public override string ToString() => JsonConvert.SerializeObject(this);
+    public override string ToString() => string.IsNullOrWhiteSpace(_message) ? JsonConvert.SerializeObject(this) : _message;
 }
 
 /// <summary>
@@ -98,9 +112,9 @@ public class PerformanceJsonConverter : TypeChangeJsonConverter<Performance, str
     {
         if (value == "None" || value == "Expected object or value")
         {
-            return Performance.Null;
+            return Performance.Null(value);
         }
 
-        return JsonConvert.DeserializeObject<Performance>(value) ?? Performance.Null;
+        return JsonConvert.DeserializeObject<Performance>(value) ?? Performance.Null(value);
     }
 }

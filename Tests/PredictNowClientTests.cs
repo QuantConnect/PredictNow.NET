@@ -23,13 +23,17 @@ public class PredictNowClientTests
 {
     private PredictNowClient _client;
     private PortfolioParameters _portfolioParameters;
+    private string _trainId = "009a02eb-7199-464a-888d-4c0245785d79"; 
 
     [SetUp]
     public void Setup()
     {
-        Config.Set("predict-now-url", Environment.GetEnvironmentVariable("PREDICTNOW-BASEURL"));
+        Config.Set("predict-now-cai-url", Environment.GetEnvironmentVariable("PREDICTNOW-CAI-URL"));
+        Config.Set("predict-now-cpo-url", Environment.GetEnvironmentVariable("PREDICTNOW-CPO-URL"));
+        Config.Set("predict-now-users-url", Environment.GetEnvironmentVariable("PREDICTNOW-USERS-URL"));
         var email = Environment.GetEnvironmentVariable("PREDICTNOW-USER-EMAIL");
-        _client = new PredictNowClient(email);
+        var userName = Environment.GetEnvironmentVariable("PREDICTNOW-USER-NAME");
+        _client = new PredictNowClient(email, userName);
         _portfolioParameters = new PortfolioParameters("Demo_Project_20231211", "ETF_return.csv", "ETF_constrain.csv", 1.0, "month", 1, "first", 3, "sharpe");
     }
 
@@ -147,20 +151,58 @@ public class PredictNowClientTests
         Assert.That(weightsByDate, Is.Not.Empty);
     }
 
+
+    [Test, Order(9)]
+    public void CreateModelSuccessfully()
+    {
+        var modelParameters = new ModelParameters(Mode.Train, ModelType.Classification, FeatureSelection.Shap, Analysis.Small, Boost.Gbdt, 42.0, false, false, false, "no");
+        var result = _client.CreateModel("fx-time-of-day", modelParameters);
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result.Success, Is.True);
+    }
+
+    [Test, Order(10)]
+    public void TrainModelSuccessfully()
+    {
+        var filename = Path.Combine(Directory.GetCurrentDirectory(), "Data", "fx-time-of-day.parquet");
+        var response = _client.Train("fx-time-of-day", filename, "strategy_ret");
+        Assert.That(response, Is.Not.Null);
+        Assert.That(response.Success, Is.True);
+        _trainId = response.TrainId;
+        var result = _client.GetTrainingResult("fx-time-of-day", response.TrainId);
+        Assert.That(result.Completed, Is.False);
+        Console.WriteLine(result);
+        Console.WriteLine(_trainId);
+    }
+
+    [Test, Order(11)]
+    public void GetTrainingResultSuccessfully()
+    {
+        var result = _client.GetTrainingResult("fx-time-of-day", _trainId);
+        Assert.That(result.Completed, Is.False);
+    }
+
+    [Test, Order(12)]
+    public void PredictSuccessfully()
+    {
+        var filename = Path.Combine(Directory.GetCurrentDirectory(), "Data", "fx-time-of-day.parquet");
+        var result = _client.Predict("fx-time-of-day", filename);
+        Assert.That(result.Filename.EndsWith(".parquet"), Is.True);
+    }
+
     private void GetJobForId(string jobId)
     {
         var maxRetries = 5;
-        var job = _client.GetJobForId(jobId);
-        var jobStatusSuccess = false;
-        while (maxRetries > 0)
+        var job = Job.Null(string.Empty);
+        while(true)
         {
-            Thread.Sleep(60000);
+            if ((maxRetries -= 1) < 0) break;
             job = _client.GetJobForId(jobId);
-            jobStatusSuccess = job.Status == "SUCCESS";
-            maxRetries = jobStatusSuccess ? 0 : maxRetries - 1;
+            if (job.Status == "SUCCESS") break;
+            Thread.Sleep(60000);
         }
 
-        Assert.That(job, Is.Not.EqualTo(Job.Null));
+        Assert.That(job, Is.Not.EqualTo(Job.Null(string.Empty)));
         Console.WriteLine($"GetJobForId: {jobId} : {job.Status}");
     }
 }

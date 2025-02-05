@@ -16,7 +16,6 @@
 using Newtonsoft.Json;
 using Python.Runtime;
 using QuantConnect.Configuration;
-using QuantConnect.Logging;
 using QuantConnect.PredictNowNET.Models;
 using System.Net;
 using System.Net.Http.Headers;
@@ -25,42 +24,84 @@ using System.Text;
 namespace QuantConnect.PredictNowNET;
 
 /// <summary>
-/// REST Client for PredictNow CPO 
+/// REST Client for PredictNow CAI and CPO 
 /// </summary>
 public class PredictNowClient : IDisposable
 {
-    private readonly HttpClient _client;
-    private readonly string _userId;
+    private readonly HttpClient _cpoClient = GetClient(Config.Get("predict-now-cpo-url"));
+    private readonly HttpClient _caiClient = GetClient(Config.Get("predict-now-cai-url"));
+    private readonly string _userId = string.Empty;
+    private readonly string _userName = string.Empty;
+    private string _lastErrorMessage;
 
     /// <summary>
-    /// Creates a new instance of the REST Client for PredictNow CPO 
+    /// Last error message
     /// </summary>
-    /// <param name="baseUrl">The base URL to PredictNow REST endpoints</param>
-    /// <param name="userId">User identification</param>
-    protected PredictNowClient(string baseUrl, string userId)
+    public string LastErrorMessage
     {
-        if (string.IsNullOrWhiteSpace(baseUrl))
+        get => _lastErrorMessage;
+        set 
         {
-            throw new ArgumentNullException($"PredictNowClient: {nameof(baseUrl)} cannot be null, empty, or consists only of white-space characters.");
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                _lastErrorMessage = value;
+            }  
         }
-
-        if (string.IsNullOrWhiteSpace(userId))
-        {
-            throw new ArgumentNullException($"PredictNowClient: {nameof(userId)} cannot be null, empty, or consists only of white-space characters.");
-        }
-
-        _userId = userId;
-        _client = new HttpClient { BaseAddress = new Uri(baseUrl) };
-        _client.DefaultRequestHeaders.Clear();
-        _client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json")); 
     }
 
     /// <summary>
-    /// Creates a new instance of REST Client for PredictNow CPO for a given user 
+    /// Creates a new instance of REST Client for PredictNow CAI and CPO for a given user 
     /// </summary>
     /// <param name="userId">User identification</param>
+    /// <param name="userName">User Name</param>
     /// <returns></returns>
-    public PredictNowClient(string userId) : this(Config.Get("predict-now-url"), userId) { }
+    public PredictNowClient(string userId, string? userName = default)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            Console.WriteLine($"PredictNowClient: {nameof(userId)} cannot be null, empty, or consists only of white-space characters.");
+            return;
+        }
+
+        if (!Config.GetBool("predict-now-verify-users", true))
+        {
+            _userId = userId;
+            _userName = userName ?? _userName;
+            return;
+        }
+
+        var usersUrl = Config.Get("predict-now-users-url");
+        if (string.IsNullOrWhiteSpace(usersUrl))
+        {
+            Console.WriteLine($"Invalid {nameof(usersUrl)} cannot be null, empty, or consists only of white-space characters. Please contact support@quantconnect.");
+            return;
+        }
+
+        var result = Encoding.UTF8.GetString(new HttpClient().GetByteArrayAsync(new Uri(usersUrl)).Result);
+        if (string.IsNullOrWhiteSpace(result))
+        {
+            Console.WriteLine($"PredictNowClient: {nameof(result)} cannot be null, empty, or consists only of white-space characters. Please contact support@quantconnect.");
+            return;
+        }
+
+        if (result.Contains(userId))
+        {
+            _userId = userId;
+            _userName = userName ?? _userName;
+        }
+
+        AccessDenied();
+    }
+
+    private bool AccessDenied()
+    {
+        if (!string.IsNullOrWhiteSpace(_userId))
+        {
+            return false;
+        }
+        Console.WriteLine("Sorry you are not authorized to access this service. The PredictNow CAI-CPO optimization service starts at $1,000 per month. Please contact sales@predictnow.ai to register for access.");
+        return true;
+    }
 
     /// <summary>
     /// Checks whether we can connect to the endpoint
@@ -70,7 +111,9 @@ public class PredictNowClient : IDisposable
         get
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, "/");
-            return TryRequest<Dictionary<string, string>>(request, out _);
+            var success = TryRequest<Dictionary<string, string>>(_cpoClient, request, out _, out var errorMessage);
+            LastErrorMessage = errorMessage;
+            return success;
         }
     }
 
@@ -159,7 +202,7 @@ public class PredictNowClient : IDisposable
             Content = new StringContent(JsonConvert.SerializeObject(livePredictionParameters), Encoding.UTF8, "application/json")
         };
 
-        return TryRequest<JobCreationResult>(request, out var result) ? result : JobCreationResult.Null;
+        return TryRequest<JobCreationResult>(_cpoClient, request, out var result, out var errorMessage) ? result : JobCreationResult.Null(errorMessage);
     }
 
     /// <summary>
@@ -170,7 +213,7 @@ public class PredictNowClient : IDisposable
     public Job GetJobForId(string jobId)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, $"get-cpo-job-status/{jobId}");
-        return TryRequest<Job>(request, out var result) ? result : Job.Null;
+        return TryRequest<Job>(_cpoClient, request, out var result, out var errorMessage) ? result : Job.Null(errorMessage);
     }
 
     /// <summary>
@@ -191,7 +234,7 @@ public class PredictNowClient : IDisposable
             Content = new StringContent(JsonConvert.SerializeObject(backtestParameters), Encoding.UTF8, "application/json")
         };
 
-        return TryRequest<Performance>(request, out var result) ? result : Performance.Null;
+        return TryRequest<Performance>(_cpoClient, request, out var result, out var errorMessage) ? result : Performance.Null(errorMessage);
     }
 
     /// <summary>
@@ -212,9 +255,12 @@ public class PredictNowClient : IDisposable
             Content = new StringContent(JsonConvert.SerializeObject(backtestParameters), Encoding.UTF8, "application/json")
         };
 
-        return TryRequest<Dictionary<DateTime, Dictionary<string, double>>>(request, out var result)
-            ? result
-            : new Dictionary<DateTime, Dictionary<string, double>>();
+        if (TryRequest<Dictionary<DateTime, Dictionary<string, double>>>(_cpoClient, request, out var result, out var errorMessage))
+        {
+            return result;
+        }
+        LastErrorMessage = errorMessage;
+        return [];
     }
 
     /// <summary>
@@ -249,9 +295,12 @@ public class PredictNowClient : IDisposable
             Content = new StringContent(JsonConvert.SerializeObject(livePredictionParameters), Encoding.UTF8, "application/json")
         };
 
-        return TryRequest<Dictionary<DateTime, Dictionary<string, double>>>(request, out var result)
-            ? result
-            : new Dictionary<DateTime, Dictionary<string, double>>();
+        if (TryRequest<Dictionary<DateTime, Dictionary<string, double>>>(_cpoClient, request, out var result, out var errorMessage))
+        {
+            return result;
+        }
+        LastErrorMessage = errorMessage;
+        return [];
     }
 
     /// <summary>
@@ -269,9 +318,145 @@ public class PredictNowClient : IDisposable
     }
 
     /// <summary>
+    /// Create the model
+    /// </summary>
+    /// <param name="name">The name of the model</param>
+    /// <param name="parameters">Model parameters</param>
+    /// <returns>The response to this request</returns>
+    public ModelResponse CreateModel(string name, ModelParameters parameters)
+    {
+        // TODO: understand the hyp_dict parameter
+        var value = new { params_ = parameters, model_name = name, username = _userName, hyp_dict = new Dictionary<string, string>() };
+        var requestParameters = JsonConvert.SerializeObject(value).Replace("params_", "params");
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/models")
+        {
+            Content = new StringContent(requestParameters, Encoding.UTF8, "application/json")
+        };
+
+        TryRequest<ModelResponse>(_caiClient, request, out var result, out var errorMessage);
+        result.Message += errorMessage;
+        return result;
+    }
+
+    /// <summary>
+    /// Train the model
+    /// </summary>
+    /// <param name="modelName">The name of the model</param>
+    /// <param name="filename">The path to the file with the data to train the model with</param>
+    /// <param name="label">The label in the data</param>
+    /// <returns>The response to this request</returns>
+    public TrainModelResponse Train(string modelName, string filename, string label)
+    {
+        var fileInfo = new FileInfo(filename);
+        if (!fileInfo.Exists)
+        {
+            return new TrainModelResponse { Message = $"{fileInfo.FullName} does not exist" };
+        }
+
+        using var stream = File.OpenRead(filename);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/trainings")
+        {
+            Content = new MultipartFormDataContent
+            {
+                { new StringContent(_userName), "username" },
+                { new StringContent(_userId), "email" },
+                { new StringContent(modelName), "model_name" },
+                { new StringContent(Guid.NewGuid().ToString()), "train_id" },
+                { new StringContent(label), "label" },
+                { new StreamContent(stream), fileInfo.Name, fileInfo.Name }
+            }
+        };
+
+        TryRequest<TrainModelResponse>(_caiClient, request, out var result, out var errorMessage);
+        result.Message += errorMessage;
+        return result;
+    }
+
+    /// <summary>
+    /// Get the training results
+    /// </summary>
+    /// <param name="modelName">The name of the model</param>
+    /// <param name="trainId">ID of the trainint job</param>
+    /// <returns>The prediction result</returns>
+    public TrainingResult GetTrainingResult(string modelName, string? trainId = null)
+    {
+        if (!string.IsNullOrWhiteSpace(trainId))
+        {
+            var trainingStatus = GetTrainingStatus(trainId);
+            if (!trainingStatus.Completed)
+            {
+                return new TrainingResult(trainingStatus);
+            }
+        }
+        
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/get_result")
+        {
+            Content = new MultipartFormDataContent
+            {
+                { new StringContent(_userName), "username" },
+                { new StringContent(modelName), "model_name" },
+            }
+        };
+
+        return TryRequest<TrainingResult>(_caiClient, request, out var result, out var errorMessage) ? result : TrainingResult.Null(errorMessage);
+    }
+
+    /// <summary>
+    /// Get the training status
+    /// </summary>
+    /// <param name="trainId">ID of the trainint job</param>
+    /// <returns>The prediction status</returns>
+    public TrainingStatus GetTrainingStatus(string trainId)
+    {
+        var requestUri = $"/get_status?username={_userName}&train_id={trainId}";
+        using var request = new HttpRequestMessage(HttpMethod.Get, requestUri);
+        return TryRequest<TrainingStatus>(_caiClient, request, out var result, out var errorMessage) ? result : TrainingStatus.Null(errorMessage);
+    }
+
+    /// <summary>
+    /// Predict with the trained model
+    /// </summary>
+    /// <param name="modelName">Name of the model</param>
+    /// <param name="filename">Path to file with the input for the prediction</param>
+    /// <param name="exploratoryDataAnalysis">True if the predition should use exploratory data analysis</param>
+    /// <param name="probabilityCalibration">True if the model should refine the probability</param>
+    /// <returns>The prediction result</returns>
+    public PredictResult Predict(string modelName, string filename, bool exploratoryDataAnalysis = false, bool probabilityCalibration = false)
+    {
+        var fileInfo = new FileInfo(filename);
+        if (!fileInfo.Exists)
+        {
+            return PredictResult.Null($"{fileInfo.FullName} does not exist");
+        }
+
+        using var stream = File.OpenRead(filename);
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/predictions")
+        {                            
+            Content = new MultipartFormDataContent
+            {
+                { new StringContent(_userName), "username" },
+                { new StringContent(modelName), "model_name" },
+                { new StringContent(exploratoryDataAnalysis ? "yes" : "no"), "eda" },
+                { new StringContent(probabilityCalibration ? "yes" : "no"), "prob_calib" },
+                { new StreamContent(stream), fileInfo.Name, fileInfo.Name }
+            }
+        };
+
+        return TryRequest<PredictResult>(_caiClient, request, out var result, out var errorMessage) ? result : PredictResult.Null(errorMessage);
+    }
+
+    /// <summary>
     /// Release unmanaged resource
     /// </summary>
-    public void Dispose() => _client.Dispose();
+    public void Dispose() 
+    {
+        _caiClient.Dispose();
+        _cpoClient.Dispose();
+        GC.SuppressFinalize(this);
+    }
 
     /// <summary>
     /// Uploads a given file to its type: returns, contraits or features
@@ -299,7 +484,7 @@ public class PredictNowClient : IDisposable
             }
         };
 
-        if (TryRequest<Dictionary<string, string>>(request, out var result))
+        if (TryRequest<Dictionary<string, string>>(_cpoClient, request, out var result, out var errorMessage))
         {
             if (result != null && result.TryGetValue("message", out var message))
             {
@@ -307,7 +492,7 @@ public class PredictNowClient : IDisposable
             }
         }
 
-        return $"The content of the response is invalid: {request.RequestUri?.AbsoluteUri}";
+        return errorMessage;
     }
 
     /// <summary>
@@ -319,11 +504,9 @@ public class PredictNowClient : IDisposable
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, $"list-{type}-files/{_userId}");
 
-        TryRequest<Dictionary<string, List<string>>>(request, out var result);
-
-        return result.Values == null
-            ? Array.Empty<string>()
-            : result.Values.SelectMany(x => x).ToArray();     
+        TryRequest<Dictionary<string, List<string>>>(_cpoClient, request, out var result, out var errorMessage);
+        LastErrorMessage = errorMessage;
+        return result.Values == null ? [] : result.Values.SelectMany(x => x).ToArray();
     }
 
     /// <summary>
@@ -346,23 +529,39 @@ public class PredictNowClient : IDisposable
             Content = new StringContent(JsonConvert.SerializeObject(backtestParameters), Encoding.UTF8, "application/json")
         };
 
-        return TryRequest<JobCreationResult>(request, out var result) ? result : JobCreationResult.Null;
+        return TryRequest<JobCreationResult>(_cpoClient, request, out var result, out var errorMessage) ? result : JobCreationResult.Null(errorMessage);
+    }
+
+    /// <summary>
+    /// Create a HTTP Client for a given URL
+    /// </summary>
+    /// <param name="url">URL of an empty</param>
+    /// <returns>HTTP Client associated with URL</returns>
+    private static HttpClient GetClient(string url)
+    {
+        var client = new HttpClient { BaseAddress = new Uri(url) };
+        client.DefaultRequestHeaders.Clear();
+        client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        return client;
     }
 
     /// <summary>
     /// Try to fulfill a HTTP Request and deserialize its result
     /// </summary>
     /// <typeparam name="T">The type of the object to deserialize</typeparam>
+    /// <param name="client">HTTP client</param>
     /// <param name="request">HTTP request</param>
     /// <param name="result">Deserialized object</param>
     /// <returns>True if the result is a non-null deserialized object</returns>
-    private bool TryRequest<T>(HttpRequestMessage request, out T result)
+    private bool TryRequest<T>(HttpClient client, HttpRequestMessage request, out T result, out string errorMessage)
     {
         result = default;
+        errorMessage = string.Empty;
+        if (AccessDenied()) return false;
 
         if (request.RequestUri == null)
         {
-            Log.Error($"TryRequest(): Error: RequestUri cannot be null");
+            errorMessage = $"RequestUri cannot be null";
             return false;
         }
 
@@ -371,19 +570,19 @@ public class PredictNowClient : IDisposable
 
         try
         {
-            var response = _client.Send(request);
+            var response = client.Send(request);
             errorCode = response.StatusCode;
             if (!response.IsSuccessStatusCode)
             {
-                Log.Error($"TryRequest({request.RequestUri.LocalPath}): Status: {errorCode}, Response content: {response.Content.ReadAsStringAsync().Result}");
+                errorMessage = $"{request.RequestUri.LocalPath}: Status: {errorCode}, Response content: {response.Content.ReadAsStringAsync().Result}";
                 return false;
             }
             responseContent = response.Content.ReadAsStringAsync().Result;
-            result = JsonConvert.DeserializeObject<T>(responseContent);
+            result = JsonConvert.DeserializeObject<T>(responseContent);  
         }
         catch (Exception e)
         {
-            Log.Error($"TryRequest({request.RequestUri.LocalPath}): Error: {e.Message}, Status: {errorCode}, Response content: {responseContent}");
+            errorMessage = $"{request.RequestUri.LocalPath}: Error: {e.Message}, Status: {errorCode}, Response content: {responseContent}";
         }
         return result != null;
     }

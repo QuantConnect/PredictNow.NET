@@ -18,31 +18,31 @@ using Newtonsoft.Json;
 namespace QuantConnect.PredictNowNET.Models;
 
 /// <summary>
-/// Information on a newly created task: in-sample and out-of-sample backtest and live prediction
+/// Base model response
 /// </summary>
-public class JobCreationResult
+public class ModelResponse
 {
     /// <summary>
-    /// Unique identifier of a job
+    /// Model Name
     /// </summary>
-    [JsonProperty(PropertyName = "task_id")]
-    public string Id { get; internal set; } = string.Empty;
+    [JsonProperty(PropertyName = "model_name")]
+    public string ModelName { get; internal set; } = string.Empty;
 
     /// <summary>
-    /// Information about the task
+    /// Result Message
     /// </summary>
     [JsonProperty(PropertyName = "message")]
     public string Message { get; internal set; } = string.Empty;
 
     /// <summary>
-    /// Represents an empty TaskResult (not associated with a valid task)
+    /// True if sucessfull 
     /// </summary>
-    /// <param name="message">Information about the task</param>
-    public static JobCreationResult Null(string message) => new() { Message = message};
+    [JsonProperty(PropertyName = "success")]
+    public bool Success { get; internal set; }
 
     /// <summary>
     /// Returns a string that represents the current object
     /// </summary>
     /// <returns>A string that represents the current object</returns>
-    public override string ToString() => $"{Message}: Id {Id}";
+    public override string ToString() => JsonConvert.SerializeObject(this);
 }
